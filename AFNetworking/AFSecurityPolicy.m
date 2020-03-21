@@ -53,15 +53,20 @@ static id AFPublicKeyForCertificate(NSData *certificate) {
     SecCertificateRef allowedCertificate;
     SecPolicyRef policy = nil;
     SecTrustRef allowedTrust = nil;
-    SecTrustResultType result;
 
     allowedCertificate = SecCertificateCreateWithData(NULL, (__bridge CFDataRef)certificate);
     __Require_Quiet(allowedCertificate != NULL, _out);
 
     policy = SecPolicyCreateBasicX509();
     __Require_noErr_Quiet(SecTrustCreateWithCertificates(allowedCertificate, policy, &allowedTrust), _out);
+    #if TARGET_OS_MACCATALYST
+    if (!SecTrustEvaluateWithError( allowedTrust, nil )) {
+        goto _out;
+    }
+    #else
+    SecTrustResultType result;
     __Require_noErr_Quiet(SecTrustEvaluate(allowedTrust, &result), _out);
-
+    #endif
     allowedPublicKey = (__bridge_transfer id)SecTrustCopyPublicKey(allowedTrust);
 
 _out:
@@ -81,14 +86,18 @@ _out:
 }
 
 static BOOL AFServerTrustIsValid(SecTrustRef serverTrust) {
-    BOOL isValid = NO;
-    SecTrustResultType result;
-    __Require_noErr_Quiet(SecTrustEvaluate(serverTrust, &result), _out);
-
-    isValid = (result == kSecTrustResultUnspecified || result == kSecTrustResultProceed);
-
-_out:
-    return isValid;
+    #if TARGET_OS_MACCATALYST
+        return SecTrustEvaluateWithError( serverTrust, nil );
+    #else
+        BOOL isValid = false;
+        SecTrustResultType result;
+        __Require_noErr_Quiet(SecTrustEvaluate(serverTrust, &result), _out);
+        
+        isValid = (result == kSecTrustResultUnspecified || result == kSecTrustResultProceed);
+            
+        _out:
+            return isValid;
+    #endif
 }
 
 static NSArray * AFCertificateTrustChainForServerTrust(SecTrustRef serverTrust) {
@@ -116,9 +125,15 @@ static NSArray * AFPublicKeyTrustChainForServerTrust(SecTrustRef serverTrust) {
         SecTrustRef trust;
         __Require_noErr_Quiet(SecTrustCreateWithCertificates(certificates, policy, &trust), _out);
 
+        #if TARGET_OS_MACCATALYST
+        if (!SecTrustEvaluateWithError( trust, nil )) {
+            goto _out;
+        }
+        #else
         SecTrustResultType result;
         __Require_noErr_Quiet(SecTrustEvaluate(trust, &result), _out);
-
+        #endif
+        
         [trustChain addObject:(__bridge_transfer id)SecTrustCopyPublicKey(trust)];
 
     _out:
